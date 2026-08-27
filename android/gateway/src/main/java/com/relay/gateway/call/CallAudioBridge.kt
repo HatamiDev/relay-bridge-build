@@ -45,12 +45,19 @@ class CallAudioBridge(private val context: Context) {
     enum class Strategy(val source: Int, val label: String, val privileged: Boolean) {
         VOICE_CALL(MediaRecorder.AudioSource.VOICE_CALL, "Telephony (both legs)", true),
         VOICE_DOWNLINK(MediaRecorder.AudioSource.VOICE_DOWNLINK, "Telephony (far end)", true),
+        // MIC before VOICE_COMMUNICATION, which is the reverse of the usual
+        // preference. VOICE_COMMUNICATION asks the platform for a processed
+        // call-quality stream, and during a live cellular call that processing
+        // — AEC keyed on the device's own playback, plus aggressive noise
+        // gating — strips out speaker-relayed speech, which is the only thing
+        // this capture is for. MIC is the raw path and the one that actually
+        // carries the far end's voice.
+        LOOPBACK_MIC(MediaRecorder.AudioSource.MIC, "Microphone loopback", false),
         LOOPBACK_COMM(
             MediaRecorder.AudioSource.VOICE_COMMUNICATION,
             "Speakerphone loopback",
             false,
         ),
-        LOOPBACK_MIC(MediaRecorder.AudioSource.MIC, "Microphone loopback", false),
     }
 
     private val audioManager = context.getSystemService<AudioManager>()
@@ -101,30 +108,104 @@ class CallAudioBridge(private val context: Context) {
      */
     fun prepareRouting(strategy: Strategy) {
         val am = audioManager ?: return
-        runCatching {
-            am.mode = AudioManager.MODE_IN_CALL
-            when (strategy) {
-                Strategy.VOICE_CALL, Strategy.VOICE_DOWNLINK -> {
-                    // Privileged tap: no acoustic path needed, keep the earpiece
-                    // so a person standing next to the gateway hears nothing.
-                    @Suppress("DEPRECATION")
-                    am.isSpeakerphoneOn = false
-                }
-                Strategy.LOOPBACK_COMM, Strategy.LOOPBACK_MIC -> {
-                    @Suppress("DEPRECATION")
-                    am.isSpeakerphoneOn = true
-                    // Push the loudspeaker up so the far end is clearly captured,
-                    // but not to max — clipping destroys the AEC reference.
+
+        // Mode first, on its own, and failure is fine.
+        //
+        // This used to be the first statement inside a single runCatching that
+        // also held the speakerphone setup — and `setMode(MODE_IN_CALL)` needs
+        // MODIFY_PHONE_STATE, which is signature|privileged. So on every
+        // ordinary install the very first line threw, the catch swallowed it,
+        // and the speakerphone code below it never ran at all. The loudspeaker
+        // stayed off, the far end's voice never reached the microphone, and the
+        // bridge carried silence in both directions while confidently
+        // reporting "Speakerphone loopback".
+        //
+        // During a real cellular call the telephony stack owns the mode anyway,
+        // so not setting it is the correct behaviour, not a compromise.
+        runCatching { am.mode = AudioManager.MODE_IN_CALL }
+            .onFailure { Log.d(TAG, "audio mode is owned by telephony, as expected") }
+
+        when (strategy) {
+            Strategy.VOICE_CALL, Strategy.VOICE_DOWNLINK -> {
+                // Privileged tap: no acoustic path needed, keep the earpiece so
+                // a person standing next to the gateway hears nothing.
+                setSpeakerphone(false)
+            }
+            Strategy.LOOPBACK_COMM, Strategy.LOOPBACK_MIC -> {
+                setSpeakerphone(true)
+                // Push the loudspeaker up so the far end is clearly captured,
+                // but not to max — clipping destroys the AEC reference.
+                runCatching {
                     val max = am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
                     am.setStreamVolume(
                         AudioManager.STREAM_VOICE_CALL,
                         (max * 0.8f).toInt().coerceAtLeast(1),
                         0,
                     )
-                }
+                }.onFailure { Log.w(TAG, "could not raise call volume", it) }
             }
-        }.onFailure { Log.w(TAG, "routing setup failed", it) }
+        }
     }
+
+    /**
+     * Route call audio to the loudspeaker, or away from it.
+     *
+     * `isSpeakerphoneOn` was deprecated in API 31 and is ignored on many builds
+     * from 33 onwards; `setCommunicationDevice` is its replacement and the only
+     * one that actually moves the audio on a current Samsung. Both are attempted
+     * — the new API first, the old one as a fallback — because which of them
+     * works varies by OEM even within one API level, and the acoustic loopback
+     * is worthless if the speaker never comes on.
+     */
+    private fun setSpeakerphone(on: Boolean) {
+        val am = audioManager ?: return
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val moved = runCatching {
+                if (!on) {
+                    am.clearCommunicationDevice()
+                    true
+                } else {
+                    val speaker = am.availableCommunicationDevices.firstOrNull {
+                        it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+                    }
+                    speaker != null && am.setCommunicationDevice(speaker)
+                }
+            }.getOrElse {
+                Log.w(TAG, "setCommunicationDevice failed", it)
+                false
+            }
+            if (moved) {
+                Log.i(TAG, "speakerphone ${if (on) "on" else "off"} via communication device")
+                return
+            }
+        }
+
+        runCatching {
+            @Suppress("DEPRECATION")
+            am.isSpeakerphoneOn = on
+            Log.i(TAG, "speakerphone ${if (on) "on" else "off"} via legacy flag")
+        }.onFailure { Log.w(TAG, "speakerphone toggle failed", it) }
+    }
+
+    /**
+     * Is the loudspeaker actually on?
+     *
+     * Reported to the receiver so a silent call has a visible cause. On builds
+     * where neither routing API is honoured for a call this app does not own,
+     * the answer is no, and the only fix is to press the speaker button on the
+     * gateway handset — which is worth telling the user rather than leaving
+     * them with a dead line.
+     */
+    fun isSpeakerphoneActive(): Boolean = runCatching {
+        val am = audioManager ?: return false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            am.communicationDevice?.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+        } else {
+            @Suppress("DEPRECATION")
+            am.isSpeakerphoneOn
+        }
+    }.getOrDefault(false)
 
     /** Advice text surfaced on the client so the user knows what to expect. */
     fun advisoryFor(strategy: Strategy?): String = when (strategy) {

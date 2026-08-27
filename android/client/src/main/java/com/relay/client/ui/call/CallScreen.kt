@@ -9,6 +9,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
+import android.media.AudioManager
+import android.media.ToneGenerator
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -49,6 +51,7 @@ import com.relay.client.ui.theme.Glass
 import com.relay.client.util.decodeBase64Image
 import com.relay.client.util.initials
 import com.relay.core.model.CallState
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 
 /**
@@ -91,6 +94,29 @@ fun CallScreen(
         contacts.firstOrNull { it.number.digits() == number.digits() }
             ?.photoB64
             ?.let(::decodeBase64Image)
+    }
+
+    // ── Ringback ─────────────────────────────────────────────────────────────
+    //
+    // Played locally rather than relayed. The network's own ringback is in-band
+    // audio on the gateway's earpiece, and it only reaches this handset once the
+    // acoustic bridge is up and the far end's speaker is carrying it — which is
+    // late, unreliable, and on some networks never happens at all. A dialling
+    // phone that is completely silent reads as broken, so this fills the gap
+    // with the standard supervisory tone and stops the moment the call connects
+    // or ends.
+    LaunchedEffect(call.state) {
+        if (call.state != CallState.DIALING && call.state != CallState.CONNECTING) return@LaunchedEffect
+        val tone = runCatching {
+            ToneGenerator(AudioManager.STREAM_VOICE_CALL, RINGBACK_VOLUME)
+        }.getOrNull() ?: return@LaunchedEffect
+        try {
+            tone.startTone(ToneGenerator.TONE_SUP_RINGTONE)
+            // Cancelled by the effect restarting on the next state change.
+            awaitCancellation()
+        } finally {
+            runCatching { tone.stopTone(); tone.release() }
+        }
     }
 
     // Duration ticks locally from the moment the gateway reports ACTIVE.
@@ -620,3 +646,7 @@ private fun formatElapsed(ms: Long): String {
 }
 
 private fun String.digits() = filter(Char::isDigit)
+
+// ToneGenerator's scale is 0..100. Loud enough to be obvious against a quiet
+// room, quiet enough not to startle someone holding the phone to their ear.
+private const val RINGBACK_VOLUME = 70

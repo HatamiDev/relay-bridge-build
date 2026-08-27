@@ -182,13 +182,23 @@ class WebRtcEngine(
                     .setAudioSource(source)
                     .setAudioFormat(android.media.AudioFormat.ENCODING_PCM_16BIT)
                     .setSampleRate(SAMPLE_RATE_HZ)
-                    .setUseHardwareAcousticEchoCanceler(
-                        JavaAudioDeviceModule.isBuiltInAcousticEchoCancelerSupported() &&
-                            source != MediaRecorder.AudioSource.VOICE_CALL,
-                    )
-                    .setUseHardwareNoiseSuppressor(
-                        JavaAudioDeviceModule.isBuiltInNoiseSuppressorSupported(),
-                    )
+                    // Hardware AEC and NS are switched off, which is the
+                    // opposite of the obvious choice.
+                    //
+                    // On a loopback bridge the sound we are trying to record is
+                    // the far end's voice coming out of this phone's own
+                    // loudspeaker. The hardware canceller's reference is the
+                    // device's playback mix, and on most HALs that mix includes
+                    // the cellular downlink — so the chip removes precisely the
+                    // signal the bridge exists to carry, and the call is silent
+                    // while every indicator says it is working. Hardware NS is
+                    // no better: speaker-relayed speech is exactly the kind of
+                    // "not a person talking into this mic" signal it suppresses.
+                    //
+                    // WebRTC's own AEC3 still runs, and its reference is only
+                    // our WebRTC playback, which is the correct thing to cancel.
+                    .setUseHardwareAcousticEchoCanceler(false)
+                    .setUseHardwareNoiseSuppressor(false)
                     .setAudioAttributes(playbackAttributes())
                     .setUseStereoInput(false)
                     .setUseStereoOutput(false)

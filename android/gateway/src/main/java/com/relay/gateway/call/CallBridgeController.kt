@@ -549,6 +549,7 @@ class CallBridgeController(
         activeStrategy = CallAudioBridge.Strategy.entries
             .firstOrNull { WebRtcEngine.sourceName(it.source) == webRtc.activeCaptureSource }
         activeStrategy?.let(audioBridge::prepareRouting)
+        reassertRouting()
 
         // Same guard as the client: an empty ICE list gathers host candidates
         // only and cannot traverse NAT. Fall back to public STUN and ask the
@@ -638,8 +639,7 @@ class CallBridgeController(
                     callId = callId,
                     state = newState,
                     cause = cause,
-                    audioMode = activeStrategy?.label
-                        ?: engine?.activeCaptureSource.orEmpty(),
+                    audioMode = describeAudio(),
                 ),
             ),
         )
@@ -652,6 +652,46 @@ class CallBridgeController(
      */
     private fun emitToActive(event: String, plaintextJson: String) {
         emit(event, plaintextJson, answeringDeviceId.ifEmpty { null })
+    }
+
+    /**
+     * What to show on the receiver under the call timer.
+     *
+     * A loopback strategy only carries audio while the gateway's loudspeaker is
+     * on, and on builds that refuse to move the route for a call this app does
+     * not own, it will not be. Saying so turns "the call is silent and I have no
+     * idea why" into "press the speaker button on the other phone".
+     */
+    private fun describeAudio(): String {
+        val label = activeStrategy?.label ?: engine?.activeCaptureSource.orEmpty()
+        val strategy = activeStrategy ?: return label
+        if (strategy.privileged) return label
+        return if (audioBridge.isSpeakerphoneActive()) {
+            label
+        } else {
+            "$label · speaker OFF on sender"
+        }
+    }
+
+    /**
+     * Put the loudspeaker back on, twice, after the bridge comes up.
+     *
+     * Telephony re-routes audio when the call actually connects, which happens
+     * after the bridge starts on an outgoing call and can happen again on an
+     * incoming one. A single call to prepareRouting at bridge time is therefore
+     * routinely undone a second later.
+     */
+    private fun reassertRouting() {
+        val strategy = activeStrategy ?: return
+        if (strategy.privileged) return
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        for (delay in longArrayOf(800L, 2_500L)) {
+            handler.postDelayed({
+                if (state == CallState.ACTIVE || state == CallState.CONNECTING) {
+                    audioBridge.prepareRouting(strategy)
+                }
+            }, delay)
+        }
     }
 
     private fun handleOf(call: Call): String =
