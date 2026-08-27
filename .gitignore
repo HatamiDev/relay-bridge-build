@@ -39,3 +39,7 @@ Thumbs.db
 *.log
 *.tmp
 server/.ws_smoke_test.js
+
+# Short-lived token handoff between the Windows credential store and the
+# sandbox, written by _dumptok.ps1 and removed by _rmtok.ps1.
+.gh_token

@@ -7,7 +7,7 @@ name: Build APK
 #
 # Configure at: Settings → Secrets and variables → Actions
 #
-#   Variable  RELAY_SERVER_URL        https://hatamidev.com     (defaults to this)
+#   Variable  RELAY_SERVER_URL        https://relay.hatamidev.com  (defaults to this)
 #   Secret    RELAY_BOOTSTRAP_SECRET  must equal BOOTSTRAP_SECRET in the server .env
 #   Secret    GOOGLE_SERVICES_JSON    base64 -w0 google-services.json   (for FCM)
 #   Secret    KEYSTORE_BASE64         base64 -w0 release.jks            (for release)
@@ -168,7 +168,7 @@ jobs:
         working-directory: android
         env:
           VARIANT: ${{ github.event.inputs.build_type || 'debug' }}
-          SERVER_URL: ${{ vars.RELAY_SERVER_URL || 'https://hatamidev.com' }}
+          SERVER_URL: ${{ vars.RELAY_SERVER_URL || 'https://relay.hatamidev.com' }}
           BOOTSTRAP: ${{ secrets.RELAY_BOOTSTRAP_SECRET }}
           KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
           KS_ALIAS: ${{ secrets.KEY_ALIAS }}
