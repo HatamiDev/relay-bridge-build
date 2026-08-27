@@ -666,10 +666,10 @@ class CallBridgeController(
         val label = activeStrategy?.label ?: engine?.activeCaptureSource.orEmpty()
         val strategy = activeStrategy ?: return label
         if (strategy.privileged) return label
-        return if (audioBridge.isSpeakerphoneActive()) {
-            label
-        } else {
-            "$label · speaker OFF on sender"
+        return when {
+            audioBridge.hasWiredHeadset() -> "$label · headset on sender"
+            audioBridge.isSpeakerphoneActive() -> label
+            else -> "$label · speaker OFF on sender"
         }
     }
 

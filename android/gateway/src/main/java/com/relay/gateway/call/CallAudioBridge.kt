@@ -132,17 +132,23 @@ class CallAudioBridge(private val context: Context) {
                 setSpeakerphone(false)
             }
             Strategy.LOOPBACK_COMM, Strategy.LOOPBACK_MIC -> {
+                // A wired headset left plugged into the gateway is a better
+                // acoustic bridge than the loudspeaker and a far better
+                // neighbour: the earpiece and the headset's inline microphone
+                // sit a few centimetres apart, so the coupling is tighter than
+                // across a room, and nothing is audible to anyone standing near
+                // the phone. Forcing the speaker in that case would be actively
+                // worse — louder, noisier, and broadcasting a private call into
+                // the room the handset happens to live in.
+                if (hasWiredHeadset()) {
+                    Log.i(TAG, "wired headset present — leaving the route alone")
+                    setCallVolume(0.5f)
+                    return
+                }
                 setSpeakerphone(true)
                 // Push the loudspeaker up so the far end is clearly captured,
                 // but not to max — clipping destroys the AEC reference.
-                runCatching {
-                    val max = am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
-                    am.setStreamVolume(
-                        AudioManager.STREAM_VOICE_CALL,
-                        (max * 0.8f).toInt().coerceAtLeast(1),
-                        0,
-                    )
-                }.onFailure { Log.w(TAG, "could not raise call volume", it) }
+                setCallVolume(0.8f)
             }
         }
     }
@@ -199,11 +205,40 @@ class CallAudioBridge(private val context: Context) {
      */
     fun isSpeakerphoneActive(): Boolean = runCatching {
         val am = audioManager ?: return false
+        // A headset is a valid — in fact preferred — acoustic path, so it
+        // counts as "the route is fine" and must not raise the speaker warning.
+        if (hasWiredHeadset()) return true
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             am.communicationDevice?.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
         } else {
             @Suppress("DEPRECATION")
             am.isSpeakerphoneOn
+        }
+    }.getOrDefault(false)
+
+    private fun setCallVolume(fraction: Float) {
+        val am = audioManager ?: return
+        runCatching {
+            val max = am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
+            am.setStreamVolume(
+                AudioManager.STREAM_VOICE_CALL,
+                (max * fraction).toInt().coerceAtLeast(1),
+                0,
+            )
+        }.onFailure { Log.w(TAG, "could not set call volume", it) }
+    }
+
+    /**
+     * Is anything plugged in — wired headset, USB audio, or a Bluetooth
+     * headset — that already carries call audio away from the loudspeaker?
+     */
+    fun hasWiredHeadset(): Boolean = runCatching {
+        val am = audioManager ?: return false
+        am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
+            it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                it.type == android.media.AudioDeviceInfo.TYPE_USB_HEADSET ||
+                it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO
         }
     }.getOrDefault(false)
 
@@ -214,9 +249,12 @@ class CallAudioBridge(private val context: Context) {
             "Telephony tap (far end only). Your voice reaches them through the " +
                 "gateway's microphone, so keep it in a quiet place."
         Strategy.LOOPBACK_COMM, Strategy.LOOPBACK_MIC ->
-            "Speakerphone loopback — this device's firmware does not expose the " +
-                "call stream. Keep the gateway phone in a quiet room; ambient " +
-                "noise will be audible to both parties."
+            "Acoustic loopback — this device's firmware does not expose the call " +
+                "stream. Plug a wired headset into the sender and rest the " +
+                "earpiece against its inline microphone: the call stays private " +
+                "and the coupling is far cleaner than across a room. Without " +
+                "one, the loudspeaker is used and the room is audible to both " +
+                "parties."
         null -> "No audio capture path available on this device."
     }
 
