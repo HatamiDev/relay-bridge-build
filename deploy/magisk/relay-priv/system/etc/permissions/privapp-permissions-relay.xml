@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Privileged-permission allowlist for RelayBridge.
+
+    Placement in /system/priv-app makes the app privileged; this file is what
+    actually lets it HOLD a signature|privileged permission. Both halves are
+    required, and having only the first is the usual reason CAPTURE_AUDIO_OUTPUT
+    still reads as denied after a successful-looking install.
+
+    The package name must match applicationId in android/app/build.gradle.kts
+    exactly. A name that matches no installed package is ignored; a malformed
+    file stops some builds from booting, which is why this is installed as a
+    Magisk module — uninstalling the module restores the device without a flash.
+-->
+<permissions>
+    <privapp-permissions package="com.relay.app">
+        <permission name="android.permission.CAPTURE_AUDIO_OUTPUT"/>
+    </privapp-permissions>
+</permissions>

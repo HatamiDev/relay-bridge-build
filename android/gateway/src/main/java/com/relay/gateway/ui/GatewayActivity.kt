@@ -66,6 +66,7 @@ import com.relay.core.util.SystemHealth
 import com.relay.gateway.BuildConfig
 import com.relay.gateway.GatewayRuntime
 import com.relay.gateway.call.CallAudioBridge
+import com.relay.gateway.call.CallBridgeController
 import com.relay.gateway.service.RelayForegroundService
 import kotlinx.coroutines.launch
 
@@ -387,6 +388,49 @@ private fun GatewayScreen() {
                 )
                 Spacer(Modifier.height(12.dp))
                 PrimaryButton("Request permissions") { permissions.launch(requiredPermissions()) }
+            }
+
+            // ── Audio capture ────────────────────────────────────────────────
+            StepCard("Call audio", accent = colors.auroraCyan) {
+                val privileged = remember { CallAudioBridge(context).hasCaptureAudioOutput() }
+                val headset = remember(dialerHeld) { CallAudioBridge(context).hasWiredHeadset() }
+
+                StatusLine(
+                    ok = privileged,
+                    okText = "Telephony tap available — full-quality audio",
+                    badText = "Telephony tap unavailable — acoustic bridge only",
+                )
+                Spacer(Modifier.height(10.dp))
+                StatusLine(
+                    ok = headset,
+                    okText = "Headset connected — the call stays private",
+                    badText = "No headset — the loudspeaker will be used",
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    if (privileged) {
+                        "This build holds CAPTURE_AUDIO_OUTPUT, so the bridge can " +
+                            "read the call stream directly. Nothing is played into " +
+                            "the room and quality is full-duplex."
+                    } else {
+                        "Android reserves the call stream for privileged apps, so " +
+                            "audio is carried acoustically. Plug a wired headset in " +
+                            "and rest its earpiece against its own inline microphone: " +
+                            "the call stays inaudible in the room and couples far " +
+                            "better than a loudspeaker across a room. " +
+                            "docs/05-PRIVILEGED-INSTALL.md covers the other route."
+                    },
+                    color = colors.textTertiary, fontSize = 12.5.sp, lineHeight = 17.sp,
+                )
+
+                val last = CallBridgeController.lastStrategyLabel
+                if (last.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "Last call used: $last",
+                        color = colors.textSecondary, fontSize = 12.sp,
+                    )
+                }
             }
 
             // ── Dialer role ──────────────────────────────────────────────────

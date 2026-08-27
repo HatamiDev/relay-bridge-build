@@ -549,6 +549,7 @@ class CallBridgeController(
         activeStrategy = CallAudioBridge.Strategy.entries
             .firstOrNull { WebRtcEngine.sourceName(it.source) == webRtc.activeCaptureSource }
         activeStrategy?.let(audioBridge::prepareRouting)
+        lastStrategyLabel = describeAudio()
         reassertRouting()
 
         // Same guard as the client: an empty ICE list gathers host candidates
@@ -727,5 +728,17 @@ class CallBridgeController(
         @Volatile
         var current: CallBridgeController? = null
             private set
+
+        /**
+         * What the last bridged call actually managed to open.
+         *
+         * Kept on the companion so the setup screen can report it between
+         * calls. Which capture source a device permits is the single fact that
+         * decides whether this app is useful on that handset, and it is only
+         * discoverable by trying — so once discovered it should not vanish with
+         * the call that discovered it.
+         */
+        @Volatile
+        var lastStrategyLabel: String = ""
     }
 }

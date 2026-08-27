@@ -1,0 +1,6 @@
+id=relay_priv
+name=RelayBridge privileged
+version=v1
+versionCode=1
+author=HatamiDev
+description=Places RelayBridge in /system/priv-app and allowlists CAPTURE_AUDIO_OUTPUT so the gateway can open the telephony audio sources.
