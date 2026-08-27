@@ -206,6 +206,43 @@ fun CallScreen(
                 fontWeight = FontWeight.Medium,
             )
 
+            // ── Why is this call silent? ─────────────────────────────────────
+            //
+            // Three different faults all present as "no sound", and the fix for
+            // each is different and none of them is guessable: a dead media
+            // path needs a network change, a muted loudspeaker needs a button
+            // pressed on the other handset, and a connected-but-empty stream
+            // means the sender's capture was refused. Naming which one it is
+            // costs one line and saves an evening.
+            //
+            // Held back for a few seconds because all three are briefly true
+            // while a call is still setting up.
+            val diagnosis = when {
+                call.state != CallState.ACTIVE || elapsed < SETTLE_MS -> ""
+                !mediaConnected ->
+                    "No media path — the phones cannot reach each other. " +
+                        "Put both on the same Wi-Fi, or configure a TURN server."
+                call.audioMode.contains("speaker OFF", ignoreCase = true) ->
+                    "The sender's loudspeaker is off. Android refused to move the " +
+                        "route, so press the speaker button on the SIM phone."
+                quality.bitrateKbps == 0 ->
+                    "Connected, but no audio is arriving — the sender's microphone " +
+                        "capture was refused by the system."
+                else -> ""
+            }
+
+            if (diagnosis.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    diagnosis,
+                    color = colors.warning,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                )
+            }
+
             Spacer(Modifier.height(18.dp))
 
             // ── HD metrics ───────────────────────────────────────────────────
@@ -650,3 +687,9 @@ private fun String.digits() = filter(Char::isDigit)
 // ToneGenerator's scale is 0..100. Loud enough to be obvious against a quiet
 // room, quiet enough not to startle someone holding the phone to their ear.
 private const val RINGBACK_VOLUME = 70
+
+// A call needs a moment to negotiate media and settle its audio route, and all
+// three silence diagnoses are briefly true in that window. Six seconds is long
+// enough that a normal call never shows a warning and short enough that a
+// broken one does not sit there mute and unexplained.
+private const val SETTLE_MS = 6_000L
