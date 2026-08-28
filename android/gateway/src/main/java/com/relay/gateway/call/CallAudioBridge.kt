@@ -61,6 +61,22 @@ class CallAudioBridge(private val context: Context) {
     }
 
     private val audioManager = context.getSystemService<AudioManager>()
+    private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    /**
+     * Whether WebRTC should cancel our own playback out of what it captures.
+     *
+     * A setting rather than a constant because the right answer depends on a
+     * device's echo canceller, which cannot be measured from here. On an
+     * acoustic loopback the wanted signal — the far end out of the loudspeaker
+     * — and the cancelled one arrive together, and an over-eager AEC removes
+     * both. Turning it off makes the far end audible at the cost of the other
+     * party hearing themselves, which on some handsets is the only way to have
+     * a call at all.
+     */
+    var echoCancellation: Boolean
+        get() = prefs.getBoolean(KEY_AEC, true)
+        set(value) = prefs.edit().putBoolean(KEY_AEC, value).apply()
 
     /**
      * Ordered list of sources to hand to `WebRtcEngine.initialize`.
@@ -148,7 +164,7 @@ class CallAudioBridge(private val context: Context) {
                 setSpeakerphone(true)
                 // Push the loudspeaker up so the far end is clearly captured,
                 // but not to max — clipping destroys the AEC reference.
-                setCallVolume(0.8f)
+                setCallVolume(0.9f)
             }
         }
     }
@@ -260,6 +276,8 @@ class CallAudioBridge(private val context: Context) {
 
     private companion object {
         const val TAG = "CallAudioBridge"
+        const val PREFS = "relay_audio"
+        const val KEY_AEC = "echo_cancellation"
         const val CAPTURE_AUDIO_OUTPUT = "android.permission.CAPTURE_AUDIO_OUTPUT"
     }
 }

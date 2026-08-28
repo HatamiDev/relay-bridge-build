@@ -489,6 +489,7 @@ class CallBridgeController(
         val webRtc = WebRtcEngine(
             context = context,
             profile = WebRtcEngine.AudioProfile.TELEPHONY_BRIDGE,
+            echoCancellation = audioBridge.echoCancellation,
             callbacks = object : WebRtcEngine.Callbacks {
 
                 override fun onLocalDescription(type: String, sdp: String) {

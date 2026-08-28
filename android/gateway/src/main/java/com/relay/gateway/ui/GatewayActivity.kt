@@ -32,6 +32,7 @@ import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -120,6 +121,7 @@ private fun GatewayScreen() {
     // used to offer the request with no indication of the result, which made an
     // ungranted role indistinguishable from a granted one.
     var dialerHeld by remember { mutableStateOf(holdsDialerRole(context)) }
+    var aecOn by remember { mutableStateOf(CallAudioBridge(context).echoCancellation) }
 
     val permissions = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -422,6 +424,46 @@ private fun GatewayScreen() {
                     },
                     color = colors.textTertiary, fontSize = 12.5.sp, lineHeight = 17.sp,
                 )
+
+                if (!privileged) {
+                    Spacer(Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "Cancel our own audio from the capture",
+                                color = colors.textPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            Text(
+                                // The honest description of the trade, because
+                                // the right setting depends on this device's
+                                // echo canceller and cannot be determined from
+                                // here — only by making a call each way.
+                                "Leave on. If the far end is inaudible, turn it " +
+                                    "off: some cancellers remove the call along " +
+                                    "with the echo, and the cost is that the " +
+                                    "other party hears themselves.",
+                                color = colors.textTertiary,
+                                fontSize = 11.5.sp,
+                                lineHeight = 15.sp,
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Switch(
+                            checked = aecOn,
+                            onCheckedChange = {
+                                aecOn = it
+                                CallAudioBridge(context).echoCancellation = it
+                                status = if (it) {
+                                    "Echo cancellation on. Place a new call to apply."
+                                } else {
+                                    "Echo cancellation off. Place a new call to apply."
+                                }
+                            },
+                        )
+                    }
+                }
 
                 val last = CallBridgeController.lastStrategyLabel
                 if (last.isNotEmpty()) {

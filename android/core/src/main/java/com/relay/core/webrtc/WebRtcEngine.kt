@@ -58,6 +58,17 @@ class WebRtcEngine(
     private val context: Context,
     private val profile: AudioProfile,
     private val callbacks: Callbacks,
+    /**
+     * Cancel our own playback out of the captured signal.
+     *
+     * On by default and correct almost always. It is exposed because on an
+     * acoustic loopback the wanted signal and the cancelled one come out of the
+     * same loudspeaker, and on a device whose AEC is too aggressive the only
+     * way to hear the far end at all is to turn it off and accept that the
+     * other end hears itself. Being able to test that in ten seconds is worth
+     * more than a confident guess about a device we cannot measure.
+     */
+    private val echoCancellation: Boolean = true,
 ) {
 
     /** Which capture/playback posture this endpoint uses. */
@@ -294,17 +305,42 @@ class WebRtcEngine(
 
     private fun attachLocalAudio(f: PeerConnectionFactory) {
         val constraints = MediaConstraints().apply {
-            // Software processing. On the gateway's VOICE_CALL path we disable
-            // AEC/NS because the modem has already done it — doubling up here
-            // produces the classic "underwater" artefact.
-            val telephony = profile == AudioProfile.TELEPHONY_BRIDGE &&
-                activeCaptureSource.startsWith("VOICE_CALL")
+            // Three different postures, and the middle one is why a loopback
+            // call was silent.
+            //
+            // A privileged telephony tap needs no software processing at all —
+            // the modem has already done it, and doubling up gives the classic
+            // "underwater" artefact.
+            //
+            // An acoustic loopback is the opposite of the default case. What
+            // the microphone hears is the far end's voice coming out of this
+            // phone's own loudspeaker: quiet, room-coloured, and — crucially —
+            // arriving at the same moment as our own WebRTC playback through
+            // that same speaker. Noise suppression classifies speaker-relayed
+            // speech as background noise and removes it. The high-pass filter
+            // takes the body out of what little survives. Together they turn a
+            // working bridge into a dead line, which is exactly what was
+            // happening.
+            //
+            // So on that path: suppression off, high-pass off, gain control on
+            // to lift a weak signal, and echo cancellation left on because our
+            // own playback genuinely must not be sent back — AEC3's
+            // double-talk handling is designed to pass near-end speech while
+            // cancelling a known reference, which is precisely this situation.
+            val loopback = profile == AudioProfile.TELEPHONY_BRIDGE && !privilegedCapture()
+            val telephonyTap = profile == AudioProfile.TELEPHONY_BRIDGE && privilegedCapture()
 
-            mandatory.add(pair("googEchoCancellation", !telephony))
-            mandatory.add(pair("googAutoGainControl", !telephony))
-            mandatory.add(pair("googNoiseSuppression", !telephony))
-            mandatory.add(pair("googHighpassFilter", true))
+            mandatory.add(pair("googEchoCancellation", !telephonyTap && echoCancellation))
+            mandatory.add(pair("googAutoGainControl", !telephonyTap))
+            mandatory.add(pair("googNoiseSuppression", !telephonyTap && !loopback))
+            mandatory.add(pair("googHighpassFilter", !loopback))
             optional.add(pair("googTypingNoiseDetection", false))
+
+            Log.i(
+                TAG,
+                "audio processing: source=$activeCaptureSource loopback=$loopback " +
+                    "aec=${!telephonyTap && echoCancellation} ns=${!telephonyTap && !loopback}",
+            )
         }
 
         localAudioSource = f.createAudioSource(constraints)
@@ -320,6 +356,11 @@ class WebRtcEngine(
             ),
         )
     }
+
+    private fun privilegedCapture(): Boolean =
+        activeCaptureSource.startsWith("VOICE_CALL") ||
+            activeCaptureSource.startsWith("VOICE_DOWNLINK") ||
+            activeCaptureSource.startsWith("VOICE_UPLINK")
 
     private fun pair(key: String, value: Boolean) =
         MediaConstraints.KeyValuePair(key, value.toString())
